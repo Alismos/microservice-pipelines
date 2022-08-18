@@ -1,0 +1,63 @@
+pipeline {
+    agent{
+            label 'jenkins-slave-1'
+            }
+    
+    environment {
+        DOCKERHUB_CREDENTIALS=credentials('dockerhub')
+    }
+    stages {
+        stage('Build auth-api') {
+            
+            steps {
+                echo 'Building..'
+                 dir('auth') {
+                 withCredentials([sshUserPrivateKey(credentialsId: 'd29af10c-df1c-4d8c-afe1-fc89f9ba1238', keyFileVariable: 'GITHUB_PRIVATE_KEY', usernameVariable: 'GITHUB_AUTH')]) {
+                 
+                 checkout([$class: 'GitSCM',
+                 branches: [[name: '*/main']],
+                 userRemoteConfigs: [[url: 'git@github.com:Alismos/auth-api-app.git']]])
+                 
+                 
+                 sh ''' ls '''
+                 sh ''' sudo docker build -t daramirezs/auth-api:latest -t daramirezs/auth-api:1.1 . '''
+                 sh ''' sudo docker images ''' 
+                 }
+                 }
+              }
+            }
+        
+        stage('Testing') {
+            steps {
+                echo 'Testing P'
+            }
+        }
+        stage ('Deploy'){
+            input{
+                message "Do you want to proceed for production deployment?"
+            }
+            steps {
+                echo 'Deploying....'
+                
+                sh ''' echo $DOCKERHUB_CREDENTIALS_PSW | sudo docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin '''
+                sh ''' sudo docker push -a daramirezs/auth-api '''
+                
+                dir('ansible'){
+                withCredentials([sshUserPrivateKey(credentialsId: 'd29af10c-df1c-4d8c-afe1-fc89f9ba1238', keyFileVariable: 'GITHUB_PRIVATE_KEY', usernameVariable: 'GITHUB_ANSIBLE')]) {
+                  checkout([$class: 'GitSCM', branches: [[name: '*/main']],
+                 userRemoteConfigs: [[url: 'git@github.com:Alismos/ansible-microservice-app.git']]])
+                }
+                
+                
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-prod',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                   sh ''' ansible-playbook auth.yml -i inventories/production/ '''
+                }
+              }
+            }
+        }
+    }
+}

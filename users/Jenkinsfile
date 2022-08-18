@@ -1,0 +1,60 @@
+pipeline {
+    agent{
+            label 'jenkins-slave-1'
+            }
+    
+    environment {
+        DOCKERHUB_CREDENTIALS=credentials('dockerhub')
+    }
+    stages {
+        stage('Build users-api') {
+            
+            steps {
+                echo 'Building..'
+                 dir('users') {
+                 withCredentials([sshUserPrivateKey(credentialsId: 'd29af10c-df1c-4d8c-afe1-fc89f9ba1238', keyFileVariable: 'GITHUB_PRIVATE_KEY', usernameVariable: 'GITHUB_USERS')]) {
+                 
+                 checkout([$class: 'GitSCM',
+                 branches: [[name: '*/main']],
+                 userRemoteConfigs: [[url: 'git@github.com:Alismos/users-api-app.git']]])
+                 
+                 sh ''' sudo docker build -t daramirezs/users-api:latest -t daramirezs/users-api:1.1 . '''
+                 }
+                 }
+              }
+            }
+        
+        stage('Testing') {
+            steps {
+                echo 'Testing'
+            }
+        }
+        stage ('Deploy'){
+            input{
+                message "Do you want to proceed for production deployment?"
+            }
+            steps {
+                echo 'Deploying....'
+                
+                sh ''' echo $DOCKERHUB_CREDENTIALS_PSW | sudo docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin '''
+                sh ''' sudo docker push -a daramirezs/frontend '''
+                
+                dir('ansible'){
+                withCredentials([sshUserPrivateKey(credentialsId: 'd29af10c-df1c-4d8c-afe1-fc89f9ba1238', keyFileVariable: 'GITHUB_PRIVATE_KEY', usernameVariable: 'GITHUB_ANSIBLE')]) {
+                  checkout([$class: 'GitSCM', branches: [[name: '*/main']],
+                 userRemoteConfigs: [[url: 'git@github.com:Alismos/ansible-microservice-app.git']]])
+                }
+                
+                
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-prod',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                   sh ''' ansible-playbook users.yml -i inventories/production/ '''
+                }
+              }
+            }
+        }
+    }
+}

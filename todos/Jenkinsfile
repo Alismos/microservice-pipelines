@@ -1,0 +1,63 @@
+pipeline {
+    agent{
+            label 'jenkins-slave-1'
+            }
+    
+    environment {
+        DOCKERHUB_CREDENTIALS=credentials('dockerhub')
+    }
+    stages {
+        stage('Build todos-api') {
+            
+            steps {
+                echo 'Building..'
+                 dir('todos') {
+                 withCredentials([sshUserPrivateKey(credentialsId: 'd29af10c-df1c-4d8c-afe1-fc89f9ba1238', keyFileVariable: 'GITHUB_PRIVATE_KEY', usernameVariable: 'GITHUB_TODOS')]) {
+                 
+                 checkout([$class: 'GitSCM',
+                 branches: [[name: '*/main']],
+                 userRemoteConfigs: [[url: 'git@github.com:Alismos/todos-api-app.git/']]])
+                 
+                 
+                 
+                 sh ''' sudo docker build -t daramirezs/todos-api:latest -t daramirezs/todos-api:1.1 . '''
+                 
+                 }
+                 }
+              }
+            }
+        
+        stage('Testing') {
+            steps {
+                echo ''' Testing '''
+            }
+        }
+        stage ('Deploy'){
+            input{
+                message "Do you want to proceed for production deployment?"
+            }
+            steps {
+                echo 'Deploying....'
+                
+                sh ''' echo $DOCKERHUB_CREDENTIALS_PSW | sudo docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin '''
+                sh ''' sudo docker push -a daramirezs/todos-api '''
+                
+                dir('ansible'){
+                withCredentials([sshUserPrivateKey(credentialsId: 'd29af10c-df1c-4d8c-afe1-fc89f9ba1238', keyFileVariable: 'GITHUB_PRIVATE_KEY', usernameVariable: 'GITHUB_ANSIBLE')]) {
+                  checkout([$class: 'GitSCM', branches: [[name: '*/main']],
+                 userRemoteConfigs: [[url: 'git@github.com:Alismos/ansible-microservice-app.git']]])
+                }
+                
+                
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-prod',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                   sh ''' ansible-playbook todos.yml -i inventories/production/ '''
+                }
+              }
+            }
+        }
+    }
+}
